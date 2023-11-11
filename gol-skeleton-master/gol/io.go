@@ -91,7 +91,6 @@ func (io *ioState) readPgmImage() {
 
 	// Request a filename from the distributor.
 	filename := <-io.channels.filename
-
 	data, ioError := ioutil.ReadFile("images/" + filename + ".pgm")
 	util.Check(ioError)
 
