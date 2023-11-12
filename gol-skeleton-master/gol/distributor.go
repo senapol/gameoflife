@@ -57,16 +57,17 @@ func distributor(p Params, c distributorChannels) {
 	c.ioFilename <- fmt.Sprint(p.ImageWidth) + "x" + fmt.Sprint(p.ImageHeight)
 
 	// TODO: Create a 2D slice to store the world.
-	world := make([][]byte, p.ImageHeight)
-	worldUpdate := make([][]byte, p.ImageHeight)
+	world := make([][]uint8, p.ImageHeight)
+	worldUpdate := make([][]uint8, p.ImageHeight)
 	for i := range world {
-		world[i] = make([]byte, p.ImageWidth)
-		worldUpdate[i] = make([]byte, p.ImageWidth)
+		world[i] = make([]uint8, p.ImageWidth)
+		worldUpdate[i] = make([]uint8, p.ImageWidth)
 	}
-
+	count := 0
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			val := <-c.ioInput
+			count++
 			world[y][x] = val
 			worldUpdate[y][x] = val
 		}
@@ -78,12 +79,9 @@ func distributor(p Params, c distributorChannels) {
 
 	for turn < p.Turns {
 
-		newWorld := make([][]uint8, p.ImageHeight)
-		for i := range newWorld {
-			newWorld[i] = make([]uint8, p.ImageWidth)
-		}
-
 		// Distribute work among worker threads
+		var newWorld [][]uint8
+
 		if p.Threads == 1 {
 			newWorld = updateWorld(0, p.ImageHeight, world, worldUpdate, p)
 		} else {
@@ -93,8 +91,9 @@ func distributor(p Params, c distributorChannels) {
 			if p.Threads <= p.ImageHeight {
 				for i := 0; i < p.Threads; i++ {
 					in[i] = make(chan [][]uint8)
-					if tempHeight == p.ImageHeight-1 {
-						go worker(p.ImageHeight, p.ImageHeight, world, worldUpdate, in[i], p)
+					if i == p.Threads-1 {
+						go worker(tempHeight, p.ImageHeight, world, worldUpdate, in[i], p)
+
 					} else {
 						if tempHeight+threadHeight+tempHeight%2 >= p.ImageHeight {
 							go worker(tempHeight, p.ImageHeight, world, worldUpdate, in[i], p)
