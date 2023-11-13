@@ -89,6 +89,15 @@ func distributor(p Params, c distributorChannels) {
 
 	turn := 0
 
+	// Send CellFlipped events for initially alive cells
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			if world[y][x] == 255 {
+				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: x, Y: y}}
+			}
+		}
+	}
+
 	var mutex sync.Mutex // Adding mutex to ensure ticker and updateWorld don't access world at the same time
 
 	// Create ticker and quit channel
@@ -144,6 +153,15 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 
+		// Send CellFlipped events for cells that change state
+		for y := 0; y < p.ImageHeight; y++ {
+			for x := 0; x < p.ImageWidth; x++ {
+				if world[y][x] != newWorld[y][x] {
+					c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: x, Y: y}}
+				}
+			}
+		}
+
 		// Update the world array after each turn
 		mutex.Lock() // Lock before modifying the world
 		for y := 0; y < p.ImageHeight; y++ {
@@ -152,6 +170,9 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 		mutex.Unlock() // Unlock after modifying
+
+		// Send TurnComplete event after updating the world
+		c.events <- TurnComplete{CompletedTurns: turn}
 
 		turn++
 	}
