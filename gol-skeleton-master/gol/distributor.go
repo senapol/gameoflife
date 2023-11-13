@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"sync"
 	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -88,6 +89,8 @@ func distributor(p Params, c distributorChannels) {
 
 	turn := 0
 
+	var mutex sync.Mutex // Adding mutex to ensure ticker and updateWorld don't access world at the same time
+
 	// Create ticker and quit channel
 	ticker := time.NewTicker(2 * time.Second)
 	done := make(chan struct{})
@@ -97,7 +100,9 @@ func distributor(p Params, c distributorChannels) {
 		for {
 			select {
 			case <-ticker.C:
+				mutex.Lock()                         // Lock before accessing the world
 				aliveCount := countAliveCells(world) // Function to count alive cells
+				mutex.Unlock()                       // Unlock after accessing
 				aliveCells := AliveCellsCount{turn, aliveCount}
 				c.events <- aliveCells
 			case <-done:
@@ -140,11 +145,13 @@ func distributor(p Params, c distributorChannels) {
 		}
 
 		// Update the world array after each turn
+		mutex.Lock() // Lock before modifying the world
 		for y := 0; y < p.ImageHeight; y++ {
 			for x := 0; x < p.ImageWidth; x++ {
 				world[y][x] = newWorld[y][x]
 			}
 		}
+		mutex.Unlock() // Unlock after modifying
 
 		turn++
 	}
