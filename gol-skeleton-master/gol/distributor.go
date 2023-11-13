@@ -90,7 +90,7 @@ func distributor(p Params, c distributorChannels) {
 
 	// Create ticker and quit channel
 	ticker := time.NewTicker(2 * time.Second)
-	quit := make(chan struct{})
+	done := make(chan struct{})
 	// TODO: Execute all turns of the Game of Life.
 
 	go func() {
@@ -100,7 +100,7 @@ func distributor(p Params, c distributorChannels) {
 				aliveCount := countAliveCells(world) // Function to count alive cells
 				aliveCells := AliveCellsCount{turn, aliveCount}
 				c.events <- aliveCells
-			case <-quit:
+			case <-done:
 				ticker.Stop()
 				return
 			}
@@ -149,6 +149,19 @@ func distributor(p Params, c distributorChannels) {
 		turn++
 	}
 
+	// Game loop is over. Now, send the final state to the io goroutine
+	c.ioCommand <- ioOutput
+	c.ioFilename <- fmt.Sprint(p.ImageWidth) + "x" + fmt.Sprint(p.ImageHeight) + "x" + fmt.Sprint(p.Turns)
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			c.ioOutput <- world[y][x]
+		}
+	}
+
+	// Wait for the io goroutine to finish writing the image
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
+
 	var alive []util.Cell
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
@@ -170,5 +183,5 @@ func distributor(p Params, c distributorChannels) {
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
-	close(quit)
+	close(done)
 }
