@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -50,6 +51,18 @@ func worker(startY, endY int, world, worldUpdate [][]uint8, out chan<- [][]uint8
 	out <- newWorld
 }
 
+func countAliveCells(world [][]uint8) int {
+	count := 0
+	for y := range world {
+		for x := range world[y] {
+			if world[y][x] == 255 {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
@@ -75,7 +88,24 @@ func distributor(p Params, c distributorChannels) {
 
 	turn := 0
 
+	// Create ticker and quit channel
+	ticker := time.NewTicker(2 * time.Second)
+	quit := make(chan struct{})
 	// TODO: Execute all turns of the Game of Life.
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				aliveCount := countAliveCells(world) // Function to count alive cells
+				aliveCells := AliveCellsCount{turn, aliveCount}
+				c.events <- aliveCells
+			case <-quit:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
 
 	for turn < p.Turns {
 
@@ -140,4 +170,5 @@ func distributor(p Params, c distributorChannels) {
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+	close(quit)
 }
