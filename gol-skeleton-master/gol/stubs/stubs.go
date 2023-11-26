@@ -2,6 +2,7 @@ package stubs
 
 var ProcessGameOfLifeHandler = "GameOfLifeOperations.ProcessGameOfLife"
 
+//basic response and requests for the gol logic
 type Response struct {
 	UpdatedWorld [][]uint8
 }
@@ -13,6 +14,7 @@ type Request struct {
 	ImageHeight  int
 }
 
+//to output alive cells
 type AliveCountRequest struct {
 	World [][]uint8
 }

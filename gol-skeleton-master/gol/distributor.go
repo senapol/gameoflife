@@ -91,6 +91,9 @@ func distributor(p Params, c distributorChannels) {
 	response := makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
 	world = response.UpdatedWorld
 
+	//outputpgm file
+	saveWorldToPGM(response.UpdatedWorld, c, p)
+
 	var alive []util.Cell
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
