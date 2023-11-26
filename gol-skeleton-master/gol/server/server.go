@@ -93,6 +93,5 @@ func main() {
 		return
 	}
 	defer listener.Close()
-	rpc.Register(new(GameOfLifeOperations))
 	rpc.Accept(listener)
 }
