@@ -75,7 +75,7 @@ func distributor(p Params, c distributorChannels) {
 
 	go func() {
 		for range ticker.C {
-			// Make an RPC call to get the alive cells count
+			//request := stubs.AliveCountRequest{World: world}
 			response := new(stubs.AliveCountResponse)
 			err := client.Call("GameOfLifeOperations.GetAliveCellsCount", &stubs.AliveCountRequest{}, response)
 			if err != nil {
@@ -91,17 +91,49 @@ func distributor(p Params, c distributorChannels) {
 	response := makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
 	world = response.UpdatedWorld
 
-	//outputpgm file
-	saveWorldToPGM(response.UpdatedWorld, c, p)
+	/*
+		paused := false
+		quit := false
+		for !quit {
+			select {
+			case key := <-c.keyPresses:
+				switch key {
+				case 's':
+					// Save current state as PGM file
+					fmt.Println("Starting output")
+					saveWorldToPGM(world, c, p)
+				case 'q':
+					return
+				case 'k':
+					// Shutdown the system and save state
+					saveWorldToPGM(world, c, p)
+					quit = true // Set flag to exit the loop
+				case 'p':
+					paused = !paused
+					if paused {
+						//fmt.Println("Paused at turn:", turn)
+						// Additional RPC call to pause processing on the server
+					} else {
+						fmt.Println("Continuing")
+						// Additional RPC call to resume processing on the server
+					}
+				}
+			}
+		}*/
 
+	//output pgm file
+	saveWorldToPGM(world, c, p)
+	aliveCount := 0
 	var alive []util.Cell
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			if world[y][x] == 255 {
 				alive = append(alive, util.Cell{x, y})
+				aliveCount++
 			}
 		}
 	}
+	fmt.Println("at end there are ", aliveCount, " alive cells")
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 	output := FinalTurnComplete{p.Turns, alive}
