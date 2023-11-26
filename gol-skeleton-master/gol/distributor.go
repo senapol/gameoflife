@@ -1,9 +1,10 @@
 package gol
 
 import (
+	"flag"
 	"fmt"
-	"sync"
-	"time"
+	"net/rpc"
+	"uk.ac.bris.cs/gameoflife/gol/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -15,42 +16,6 @@ type distributorChannels struct {
 	ioOutput   chan<- uint8
 	ioInput    <-chan uint8
 	keyPresses <-chan rune
-}
-
-func countNeighbours(y, x int, world [][]uint8, p Params) int {
-	neighbours := 0
-	for y1 := -1; y1 <= 1; y1++ {
-		for x1 := -1; x1 <= 1; x1++ {
-			if world[(y+y1+p.ImageHeight)%p.ImageHeight][(x+x1+p.ImageWidth)%p.ImageWidth] == 255 && (y1 != 0 || x1 != 0) {
-				neighbours++
-			}
-		}
-	}
-	return neighbours
-}
-
-func updateWorld(startY, endY int, world, worldUpdate [][]uint8, p Params) [][]uint8 {
-	for y := startY; y < endY; y++ {
-		for x := 0; x < p.ImageWidth; x++ {
-			neighbours := countNeighbours(y, x, world, p)
-
-			if world[y][x] == 255 {
-				if neighbours > 3 || neighbours < 2 {
-					worldUpdate[y][x] = 0
-				}
-			} else {
-				if neighbours == 3 {
-					worldUpdate[y][x] = 255
-				}
-			}
-		}
-	}
-	return worldUpdate
-}
-
-func worker(startY, endY int, world, worldUpdate [][]uint8, out chan<- [][]uint8, p Params) {
-	newWorld := updateWorld(startY, endY, world, worldUpdate, p)
-	out <- newWorld
 }
 
 func countAliveCells(world [][]uint8) int {
@@ -79,8 +44,18 @@ func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params) {
 	<-c.ioIdle
 }
 
-// distributor divides the work between workers and interacts with other goroutines.
+func makeCall(client *rpc.Client, initialWorld [][]uint8, turns int, imageWidth, imageHeight int) {
+	request := stubs.Request{InitialWorld: initialWorld, Turns: turns, ImageWidth: imageWidth, ImageHeight: imageHeight}
+	response := new(stubs.Response)
+	client.Call(stubs.ProcessGameOfLifeHandler, request, response)
+	fmt.Println("Responded: ")
+}
+
 func distributor(p Params, c distributorChannels) {
+	server := flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
+	flag.Parse()
+	client, _ := rpc.Dial("tcp", *server)
+	defer client.Close()
 
 	c.ioCommand <- ioInput
 	c.ioFilename <- fmt.Sprint(p.ImageWidth) + "x" + fmt.Sprint(p.ImageHeight)
@@ -101,123 +76,9 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
-	turn := 0
-
-	// Send CellFlipped events for initially alive cells
-	for y := 0; y < p.ImageHeight; y++ {
-		for x := 0; x < p.ImageWidth; x++ {
-			if world[y][x] == 255 {
-				c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: x, Y: y}}
-			}
-		}
+	if p.Threads == 1 {
+		makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
 	}
-
-	var mutex sync.Mutex // Adding mutex to ensure ticker and updateWorld don't access world at the same time
-
-	// Create ticker and a tickerPause channel
-	ticker := time.NewTicker(2 * time.Second)
-	done := make(chan struct{})
-	tickerPaused := false
-	// TODO: Execute all turns of the Game of Life.
-
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				if !tickerPaused {
-					mutex.Lock()                         // Lock before accessing the world
-					aliveCount := countAliveCells(world) // Function to count alive cells
-					mutex.Unlock()                       // Unlock after accessing
-					aliveCells := AliveCellsCount{turn, aliveCount}
-					c.events <- aliveCells
-				}
-			case <-done:
-				ticker.Stop()
-				return
-			}
-		}
-	}()
-
-	paused := false
-	quit := false
-
-	for turn < p.Turns && !quit {
-		var newWorld [][]uint8
-		select {
-		case key := <-c.keyPresses:
-			switch key {
-			case 'p':
-				paused = !paused
-				if paused {
-					c.events <- StateChange{turn, 0}
-					tickerPaused = true
-				} else {
-					c.events <- StateChange{turn, 1}
-					tickerPaused = false
-				}
-			case 's':
-				fmt.Println("Starting output")
-				saveWorldToPGM(world, c, p)
-			case 'q':
-				c.events <- StateChange{turn, 2}
-				quit = true
-			}
-		default:
-			if !paused {
-				if p.Threads == 1 {
-					newWorld = updateWorld(0, p.ImageHeight, world, worldUpdate, p)
-				} else {
-					in := make([]chan [][]uint8, p.Threads)
-					threadHeight := p.ImageHeight / p.Threads
-					tempHeight := 0
-					if p.Threads <= p.ImageHeight {
-						for i := 0; i < p.Threads; i++ {
-							in[i] = make(chan [][]uint8)
-							if i == p.Threads-1 {
-								go worker(tempHeight, p.ImageHeight, world, worldUpdate, in[i], p)
-
-							} else {
-								if tempHeight+threadHeight+tempHeight%2 >= p.ImageHeight {
-									go worker(tempHeight, p.ImageHeight, world, worldUpdate, in[i], p)
-								} else {
-									go worker(tempHeight, tempHeight+threadHeight+tempHeight%2, world, worldUpdate, in[i], p)
-									tempHeight += threadHeight + tempHeight%2
-								}
-							}
-						}
-						for i := 0; i < p.Threads; i++ {
-							newWorld = append(newWorld, <-in[i]...)
-						}
-					}
-				}
-				// Send CellFlipped events for cells that change state
-				for y := 0; y < p.ImageHeight; y++ {
-					for x := 0; x < p.ImageWidth; x++ {
-						if world[y][x] != newWorld[y][x] {
-							c.events <- CellFlipped{CompletedTurns: turn, Cell: util.Cell{X: x, Y: y}}
-						}
-					}
-				}
-
-				// Update the world array after each turn
-				mutex.Lock() // Lock before modifying the world
-				for y := 0; y < p.ImageHeight; y++ {
-					for x := 0; x < p.ImageWidth; x++ {
-						world[y][x] = newWorld[y][x]
-					}
-				}
-				mutex.Unlock() // Unlock after modifying
-
-				// Send TurnComplete event after updating the world
-				c.events <- TurnComplete{CompletedTurns: turn}
-
-				turn++
-			}
-		}
-	}
-
-	// TODO: Create a 2D slice to store the world.
-	saveWorldToPGM(world, c, p)
 
 	var alive []util.Cell
 	for y := 0; y < p.ImageHeight; y++ {
@@ -229,16 +90,15 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
-	output := FinalTurnComplete{turn, alive}
+	output := FinalTurnComplete{p.Turns, alive}
 	c.events <- output
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
-	c.events <- StateChange{turn, Quitting}
+	c.events <- StateChange{p.Turns, Quitting}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
-	close(done)
 }
