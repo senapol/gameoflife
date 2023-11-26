@@ -50,25 +50,34 @@ func (s *GameOfLifeOperations) ProcessGameOfLife(req stubs.Request, res *stubs.R
 		fmt.Println("Empty World")
 		return
 	}
-	fmt.Println("Got Initial World: ")
+	fmt.Println("Got Initial World")
 
 	//set up a world update to not edit the original
 	worldUpdate := make([][]uint8, req.ImageHeight)
+	world := make([][]uint8, req.ImageHeight)
 	for i := range req.InitialWorld {
 		worldUpdate[i] = make([]uint8, req.ImageWidth)
+		world[i] = make([]uint8, req.ImageWidth)
 	}
 	for y := 0; y < req.ImageHeight; y++ {
 		for x := 0; x < req.ImageWidth; x++ {
-			req.InitialWorld[y][x] = req.InitialWorld[y][x]
+			worldUpdate[y][x] = req.InitialWorld[y][x]
+			world[y][x] = req.InitialWorld[y][x]
 		}
 	}
 
-	//start updating world
+	//start updating worldx
 	currentTurn := 0
 	quit := false
 
 	for currentTurn < req.Turns && !quit {
-		worldUpdate = updateWorld(0, req.ImageHeight, req.InitialWorld, worldUpdate, req.ImageWidth, req.ImageHeight)
+		worldUpdate = updateWorld(0, req.ImageHeight, world, worldUpdate, req.ImageWidth, req.ImageHeight)
+		currentTurn++
+		for y := 0; y < req.ImageHeight; y++ {
+			for x := 0; x < req.ImageWidth; x++ {
+				world[y][x] = worldUpdate[y][x]
+			}
+		}
 	}
 	res.UpdatedWorld = worldUpdate
 	return
@@ -79,8 +88,11 @@ func main() {
 	flag.Parse()
 	rand.Seed(time.Now().UnixNano())
 	rpc.Register(&GameOfLifeOperations{})
-	listener, _ := net.Listen("tcp", ":"+*pAddr)
+	listener, err := net.Listen("tcp", ":"+*pAddr)
+	if err != nil {
+		return
+	}
 	defer listener.Close()
-
+	rpc.Register(new(GameOfLifeOperations))
 	rpc.Accept(listener)
 }

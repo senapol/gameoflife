@@ -18,6 +18,8 @@ type distributorChannels struct {
 	keyPresses <-chan rune
 }
 
+var server = flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
+
 func countAliveCells(world [][]uint8) int {
 	count := 0
 	for y := range world {
@@ -44,15 +46,15 @@ func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params) {
 	<-c.ioIdle
 }
 
-func makeCall(client *rpc.Client, initialWorld [][]uint8, turns int, imageWidth, imageHeight int) {
+func makeCall(client *rpc.Client, initialWorld [][]uint8, turns int, imageWidth, imageHeight int) *stubs.Response {
 	request := stubs.Request{InitialWorld: initialWorld, Turns: turns, ImageWidth: imageWidth, ImageHeight: imageHeight}
 	response := new(stubs.Response)
 	client.Call(stubs.ProcessGameOfLifeHandler, request, response)
-	fmt.Println("Responded: ")
+	fmt.Println("Responded")
+	return response
 }
 
 func distributor(p Params, c distributorChannels) {
-	server := flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
 	flag.Parse()
 	client, _ := rpc.Dial("tcp", *server)
 	defer client.Close()
@@ -76,9 +78,11 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
-	if p.Threads == 1 {
+	/*if p.Threads == 1 {
 		makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
-	}
+	}*/
+	response := makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
+	world = response.UpdatedWorld
 
 	var alive []util.Cell
 	for y := 0; y < p.ImageHeight; y++ {
