@@ -12,3 +12,12 @@ type Request struct {
 	ImageWidth   int
 	ImageHeight  int
 }
+
+type AliveCountRequest struct {
+	World [][]uint8
+}
+
+type AliveCountResponse struct {
+	CompletedTurns int
+	Count          int
+}

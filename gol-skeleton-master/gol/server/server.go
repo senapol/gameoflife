@@ -22,6 +22,26 @@ func countNeighbours(y, x int, world [][]uint8, imageHeight, imageWidth int) int
 	return neighbours
 }
 
+func (s *GameOfLifeOperations) GetAliveCellsCount(req stubs.AliveCountRequest, res *stubs.AliveCountResponse) error {
+	// Calculate the number of alive cells in the current world state
+	aliveCount := countAliveCells(req.World)
+	res.CompletedTurns = s.currentTurn
+	res.Count = aliveCount
+	return nil
+}
+
+func countAliveCells(world [][]uint8) int {
+	count := 0
+	for y := range world {
+		for x := range world[y] {
+			if world[y][x] == 255 {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 /** Super-Secret `reversing a string' method we can't allow clients to see. **/
 func updateWorld(startY, endY int, world, worldUpdate [][]uint8, imageHeight, imageWidth int) [][]uint8 {
 	for y := startY; y < endY; y++ {
@@ -42,7 +62,9 @@ func updateWorld(startY, endY int, world, worldUpdate [][]uint8, imageHeight, im
 	return worldUpdate
 }
 
-type GameOfLifeOperations struct{}
+type GameOfLifeOperations struct {
+	currentTurn int
+}
 
 func (s *GameOfLifeOperations) ProcessGameOfLife(req stubs.Request, res *stubs.Response) (err error) {
 	//check that the world isn't empty

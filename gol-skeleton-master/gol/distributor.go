@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net/rpc"
+	"time"
 	"uk.ac.bris.cs/gameoflife/gol/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -19,18 +20,6 @@ type distributorChannels struct {
 }
 
 var server = flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
-
-func countAliveCells(world [][]uint8) int {
-	count := 0
-	for y := range world {
-		for x := range world[y] {
-			if world[y][x] == 255 {
-				count++
-			}
-		}
-	}
-	return count
-}
 
 func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params) {
 	c.ioCommand <- ioOutput
@@ -81,6 +70,24 @@ func distributor(p Params, c distributorChannels) {
 	/*if p.Threads == 1 {
 		makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
 	}*/
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	go func() {
+		for range ticker.C {
+			// Make an RPC call to get the alive cells count
+			response := new(stubs.AliveCountResponse)
+			err := client.Call("GameOfLifeOperations.GetAliveCellsCount", &stubs.AliveCountRequest{}, response)
+			if err != nil {
+				fmt.Println("Error in RPC call:", err)
+				continue
+			}
+
+			// Send AliveCellsCount event
+			c.events <- AliveCellsCount{CompletedTurns: response.CompletedTurns, CellsCount: response.Count}
+		}
+	}()
+
 	response := makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
 	world = response.UpdatedWorld
 
