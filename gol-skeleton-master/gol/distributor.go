@@ -21,9 +21,13 @@ type distributorChannels struct {
 
 var server = flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
 
-func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params) {
+func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params, currentTurn int) {
+	if world == nil || len(world) == 0 {
+		fmt.Println("World is empty, skipping PGM save")
+		return
+	}
 	c.ioCommand <- ioOutput
-	c.ioFilename <- fmt.Sprint(p.ImageWidth) + "x" + fmt.Sprint(p.ImageHeight) + "x" + fmt.Sprint(p.Turns)
+	c.ioFilename <- fmt.Sprint(p.ImageWidth) + "x" + fmt.Sprint(p.ImageHeight) + "x" + fmt.Sprint(currentTurn)
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			c.ioOutput <- world[y][x]
@@ -33,6 +37,25 @@ func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params) {
 	// Wait for the io goroutine to finish writing the image
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
+}
+
+func updateCurrentTurn(client *rpc.Client) int {
+	turnRequest := stubs.AliveCountRequest{}
+	turnResponse := new(stubs.AliveCountResponse)
+	turnErr := client.Call("GameOfLifeOperations.GetAliveCellsCount", turnRequest, turnResponse)
+	if turnErr != nil {
+		fmt.Println("Error in RPC call:", turnErr)
+	}
+	return turnResponse.CompletedTurns
+}
+
+func pauseServerEvaluation(paused bool, client *rpc.Client) {
+	pauseReq := stubs.PauseRequest{Pause: paused}
+	pauseRes := new(stubs.PauseResponse)
+	err := client.Call("GameOfLifeOperations.TogglePause", pauseReq, pauseRes)
+	if err != nil {
+		fmt.Println("Error in RPC call to toggle pause:", err)
+	}
 }
 
 func makeCall(client *rpc.Client, initialWorld [][]uint8, turns int, imageWidth, imageHeight int) *stubs.Response {
@@ -47,6 +70,8 @@ func distributor(p Params, c distributorChannels) {
 	flag.Parse()
 	client, _ := rpc.Dial("tcp", *server)
 	defer client.Close()
+	paused := false
+	//pauseServerEvaluation(paused, client)
 
 	c.ioCommand <- ioInput
 	c.ioFilename <- fmt.Sprint(p.ImageWidth) + "x" + fmt.Sprint(p.ImageHeight)
@@ -67,84 +92,114 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
-	/*if p.Threads == 1 {
-		makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
-	}*/
 	ticker := time.NewTicker(2 * time.Second)
+	done := make(chan struct{})
+	tickerPaused := false
 	defer ticker.Stop()
 
 	go func() {
-		for range ticker.C {
-			//request := stubs.AliveCountRequest{World: world}
-			response := new(stubs.AliveCountResponse)
-			err := client.Call("GameOfLifeOperations.GetAliveCellsCount", &stubs.AliveCountRequest{}, response)
-			if err != nil {
-				fmt.Println("Error in RPC call:", err)
-				continue
+		for {
+			select {
+			case <-ticker.C:
+				if !tickerPaused {
+					request := stubs.AliveCountRequest{}
+					response := new(stubs.AliveCountResponse)
+					err := client.Call("GameOfLifeOperations.GetAliveCellsCount", request, response)
+					if err != nil {
+						fmt.Println("Error in RPC call:", err)
+						continue
+					}
+
+					// Send AliveCellsCount event
+					c.events <- AliveCellsCount{CompletedTurns: response.CompletedTurns, CellsCount: response.Count}
+				}
+			case <-done:
+				ticker.Stop()
+				return
 			}
 
-			// Send AliveCellsCount event
-			c.events <- AliveCellsCount{CompletedTurns: response.CompletedTurns, CellsCount: response.Count}
 		}
 	}()
 
-	response := makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
-	world = response.UpdatedWorld
+	currentTurn := 0
+	quit := false
 
-	/*
-		paused := false
-		quit := false
+	go func() {
 		for !quit {
 			select {
 			case key := <-c.keyPresses:
+				currentTurn = updateCurrentTurn(client)
 				switch key {
 				case 's':
 					// Save current state as PGM file
-					fmt.Println("Starting output")
-					saveWorldToPGM(world, c, p)
+					saveWorldToPGM(world, c, p, currentTurn)
 				case 'q':
-					return
+					//update current turn
+					quit = true
 				case 'k':
-					// Shutdown the system and save state
-					saveWorldToPGM(world, c, p)
+					//update current turn and save image
+					saveWorldToPGM(world, c, p, currentTurn)
+
+					//shut down
+					shutdownReq := new(stubs.ShutdownRequest)
+					shutdownRes := new(stubs.ShutdownResponse)
+					err := client.Call("GameOfLifeOperations.Shutdown", shutdownReq, shutdownRes)
+					if err != nil {
+						fmt.Println("Error in RPC call to shut down server:", err)
+					}
 					quit = true // Set flag to exit the loop
+					fmt.Println(shutdownRes.Message)
 				case 'p':
 					paused = !paused
+					pauseServerEvaluation(paused, client)
 					if paused {
-						//fmt.Println("Paused at turn:", turn)
-						// Additional RPC call to pause processing on the server
+						c.events <- StateChange{currentTurn, 0}
+						tickerPaused = true
 					} else {
-						fmt.Println("Continuing")
-						// Additional RPC call to resume processing on the server
+						c.events <- StateChange{currentTurn, 1}
+						tickerPaused = false
 					}
 				}
 			}
-		}*/
-
-	//output pgm file
-	saveWorldToPGM(world, c, p)
-	aliveCount := 0
-	var alive []util.Cell
-	for y := 0; y < p.ImageHeight; y++ {
-		for x := 0; x < p.ImageWidth; x++ {
-			if world[y][x] == 255 {
-				alive = append(alive, util.Cell{x, y})
-				aliveCount++
+		}
+		if quit {
+			paused = true
+			pauseServerEvaluation(paused, client)
+			client.Close() // Close the RPC client connection
+			fmt.Println("Client closed")
+			return
+		}
+	}()
+	response := makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
+	world = response.UpdatedWorld
+	if !quit {
+		//output pgm file
+		currentTurn = updateCurrentTurn(client)
+		saveWorldToPGM(world, c, p, currentTurn)
+		aliveCount := 0
+		var alive []util.Cell
+		for y := 0; y < p.ImageHeight; y++ {
+			for x := 0; x < p.ImageWidth; x++ {
+				if world[y][x] == 255 {
+					alive = append(alive, util.Cell{x, y})
+					aliveCount++
+				}
 			}
 		}
-	}
-	fmt.Println("at end there are ", aliveCount, " alive cells")
+		fmt.Println("at end there are ", aliveCount, " alive cells")
 
-	// TODO: Report the final state using FinalTurnCompleteEvent.
-	output := FinalTurnComplete{p.Turns, alive}
-	c.events <- output
+		// TODO: Report the final state using FinalTurnCompleteEvent.
+		output := FinalTurnComplete{currentTurn, alive}
+		c.events <- output
+	}
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
-	c.events <- StateChange{p.Turns, Quitting}
+	c.events <- StateChange{currentTurn, Quitting}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+	close(done)
 	close(c.events)
 }

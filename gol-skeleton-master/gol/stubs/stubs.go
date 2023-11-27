@@ -15,11 +15,38 @@ type Request struct {
 }
 
 //to output alive cells
-type AliveCountRequest struct {
-	World [][]uint8
-}
+type AliveCountRequest struct{}
 
 type AliveCountResponse struct {
 	CompletedTurns int
 	Count          int
+}
+
+//to pause
+type PauseRequest struct {
+	Pause bool
+}
+
+type PauseResponse struct {
+	// Any response fields if needed
+}
+
+//to shut down
+type ShutdownRequest struct {
+	// We can add fields here if needed
+}
+
+type ShutdownResponse struct {
+	// Fields to indicate the result of the shutdown operation
+	Success bool
+	Message string
+}
+
+//resetting the state:
+type ResetStateRequest struct {
+	World [][]uint8
+}
+
+type ResetStateResponse struct {
+	// any response fields we want
 }
