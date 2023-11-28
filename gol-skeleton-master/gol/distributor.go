@@ -356,10 +356,8 @@ func distributor(p Params, c distributorChannels) {
 					quit = true
 				case 'k':
 					saveWorldToPGM(world, c, p, currentTurn)
+					quit = true
 					shutDown = true
-
-					//shut down
-					shutdownServer(broker)
 				case 'p':
 					paused = !paused
 					pauseServerEvaluation(paused, broker)
@@ -422,6 +420,9 @@ func distributor(p Params, c distributorChannels) {
 			fmt.Println("Error resetting server state:", err)
 			return
 		}
+	} else if shutDown {
+		//shut down server
+		shutdownServer(broker)
 	}
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(done)
