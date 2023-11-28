@@ -117,6 +117,7 @@ func (s *GameOfLifeOperations) StopGameLoop(req *stubs.StopRequest, res *stubs.S
 	defer s.mutex.Unlock()
 	s.shouldStop = true
 	res.Message = "Game loop will be stopped"
+	fmt.Println("Game loop stopped")
 	return nil
 }
 
@@ -168,7 +169,6 @@ func (s *GameOfLifeOperations) ProcessGameOfLife(req stubs.Request, res *stubs.R
 			s.mutex.Lock()
 			worldUpdate = updateWorld(0, s.imageHeight, s.currentWorld, worldUpdate, s.imageWidth, s.imageHeight)
 			s.currentTurn++
-			fmt.Println("current turn is ", s.currentTurn)
 			for y := 0; y < s.imageHeight; y++ {
 				for x := 0; x < s.imageWidth; x++ {
 					s.currentWorld[y][x] = worldUpdate[y][x]
