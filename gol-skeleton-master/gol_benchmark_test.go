@@ -12,7 +12,7 @@ func BenchmarkRun(b *testing.B) {
 	os.Stdout = nil
 
 	fmt.Println("got here")
-	for threads := 1; threads <= 16; threads++ {
+	for threads := 1; threads <= 5; threads++ {
 
 		params := gol.Params{
 			Turns:       100,
@@ -33,7 +33,7 @@ func BenchmarkRun(b *testing.B) {
 				go gol.Run(params, events, nil)
 				for range events {
 				}
-				close(events)
+				//close(events)
 				//close(keyPresses)
 			}
 		})
