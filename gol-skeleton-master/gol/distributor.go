@@ -66,10 +66,17 @@ func makeCall(client *rpc.Client, initialWorld [][]uint8, turns int, imageWidth,
 	return response
 }
 
+func resetServerState(client *rpc.Client, width, height int, world [][]uint8) error {
+	req := stubs.ResetStateRequest{ImageWidth: width, ImageHeight: height, World: world}
+	res := new(stubs.ResetStateResponse)
+	return client.Call("GameOfLifeOperations.ResetState", &req, res)
+}
+
 func distributor(p Params, c distributorChannels) {
 	flag.Parse()
 	client, _ := rpc.Dial("tcp", *server)
 	defer client.Close()
+
 	paused := false
 	//pauseServerEvaluation(paused, client)
 
@@ -90,6 +97,16 @@ func distributor(p Params, c distributorChannels) {
 			world[y][x] = val
 			worldUpdate[y][x] = val
 		}
+	}
+	go func() {
+		for {
+			//fmt.Println("p.imageheight: ", p.ImageHeight, "p.imagewidth: ", p.ImageWidth)
+		}
+
+	}()
+	if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
+		fmt.Println("Error resetting server state:", err)
+		return
 	}
 
 	ticker := time.NewTicker(2 * time.Second)
@@ -165,6 +182,22 @@ func distributor(p Params, c distributorChannels) {
 		if quit {
 			paused = true
 			pauseServerEvaluation(paused, client)
+
+			// Stop the game loop
+			stopReq := new(stubs.StopRequest)
+			stopRes := new(stubs.StopResponse)
+			err := client.Call("GameOfLifeOperations.StopGameLoop", stopReq, stopRes)
+			if err != nil {
+				fmt.Println("Error stopping game loop:", err)
+			} else {
+				fmt.Println(stopRes.Message)
+			}
+
+			// Reset the server state
+			if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
+				fmt.Println("Error resetting server state:", err)
+			}
+
 			client.Close() // Close the RPC client connection
 			fmt.Println("Client closed")
 			return
@@ -198,6 +231,22 @@ func distributor(p Params, c distributorChannels) {
 	<-c.ioIdle
 
 	c.events <- StateChange{currentTurn, Quitting}
+
+	//stopping game loop execution
+	stopReq := new(stubs.StopRequest)
+	stopRes := new(stubs.StopResponse)
+	err := client.Call("GameOfLifeOperations.StopGameLoop", stopReq, stopRes)
+	if err != nil {
+		fmt.Println("Error stopping game loop:", err)
+	} else {
+		fmt.Println(stopRes.Message)
+	}
+
+	//resetting server state
+	if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
+		fmt.Println("Error resetting server state:", err)
+		return
+	}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(done)
