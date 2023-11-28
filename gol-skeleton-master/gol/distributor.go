@@ -73,7 +73,6 @@ func resetServerState(client *rpc.Client, width, height int, world [][]uint8) er
 }
 
 func distributor(p Params, c distributorChannels) {
-	fmt.Println("distributor called")
 	flag.Parse()
 	client, _ := rpc.Dial("tcp", *server)
 	defer client.Close()
@@ -99,13 +98,23 @@ func distributor(p Params, c distributorChannels) {
 			worldUpdate[y][x] = val
 		}
 	}
-	fmt.Println("defined worlds")
 
+	//stopping game loop execution
+	stopReq := new(stubs.StopRequest)
+	stopRes := new(stubs.StopResponse)
+	err := client.Call("GameOfLifeOperations.StopGameLoop", stopReq, stopRes)
+	if err != nil {
+		fmt.Println("Error stopping game loop:", err)
+	} else {
+		fmt.Println(stopRes.Message)
+	}
+
+	//resetting server state
 	if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
 		fmt.Println("Error resetting server state:", err)
 		return
 	}
-	fmt.Println("reset server state")
+
 	ticker := time.NewTicker(2 * time.Second)
 	done := make(chan struct{})
 	tickerPaused := false
@@ -135,8 +144,6 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}()
 
-	fmt.Println("ran ticker")
-
 	currentTurn := 0
 	quit := false
 	shutDown := false
@@ -151,10 +158,8 @@ func distributor(p Params, c distributorChannels) {
 					// Save current state as PGM file
 					saveWorldToPGM(world, c, p, currentTurn)
 				case 'q':
-					fmt.Println("q pressed")
 					quit = true
 				case 'k':
-					fmt.Println("k pressed")
 					saveWorldToPGM(world, c, p, currentTurn)
 					shutDown = true
 
@@ -180,7 +185,6 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 		if quit {
-			fmt.Println("quit key is pressed")
 			//paused = true
 			//pauseServerEvaluation(paused, client)
 
@@ -202,10 +206,8 @@ func distributor(p Params, c distributorChannels) {
 			return
 		}
 	}()
-	fmt.Println("ran kepresses")
 	response := makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
 	world = response.UpdatedWorld
-	fmt.Println("server responded with the entire world")
 	if !quit && !shutDown {
 		//output pgm file
 		currentTurn = updateCurrentTurn(client)
@@ -220,7 +222,6 @@ func distributor(p Params, c distributorChannels) {
 				}
 			}
 		}
-		fmt.Println("at end there are ", aliveCount, " alive cells")
 
 		// TODO: Report the final state using FinalTurnCompleteEvent.
 		output := FinalTurnComplete{currentTurn, alive}
@@ -230,7 +231,6 @@ func distributor(p Params, c distributorChannels) {
 	<-c.ioIdle
 
 	c.events <- StateChange{currentTurn, Quitting}
-	fmt.Println("made it here")
 	if !shutDown {
 		//stopping game loop execution
 		stopReq := new(stubs.StopRequest)

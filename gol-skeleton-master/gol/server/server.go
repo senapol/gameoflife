@@ -96,6 +96,7 @@ func (s *GameOfLifeOperations) ResetState(req stubs.ResetStateRequest, res *stub
 	s.imageWidth = req.ImageWidth
 	s.imageHeight = req.ImageHeight
 	s.shouldStop = false
+	s.paused = false
 	s.currentTurn = 0
 	s.currentWorld = make([][]uint8, len(req.World))
 	for i := range req.World {
