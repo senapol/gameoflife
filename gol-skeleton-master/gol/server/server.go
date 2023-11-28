@@ -77,15 +77,16 @@ func updateWorld(startY, endY int, world, worldUpdate [][]uint8, imageHeight, im
 }
 
 type GameOfLifeOperations struct {
-	currentTurn   int
-	paused        bool
-	currentWorld  [][]uint8
-	mutex         sync.Mutex
-	shutdownChan  chan struct{}
-	maintainState bool
-	imageHeight   int
-	imageWidth    int
-	shouldStop    bool
+	currentTurn     int
+	paused          bool
+	currentWorld    [][]uint8
+	mutex           sync.Mutex
+	shutdownChan    chan struct{}
+	maintainState   bool
+	imageHeight     int
+	imageWidth      int
+	shouldStop      bool
+	clientConnected bool
 }
 
 func (s *GameOfLifeOperations) ResetState(req stubs.ResetStateRequest, res *stubs.ResetStateResponse) error {
@@ -120,9 +121,10 @@ func (s *GameOfLifeOperations) StopGameLoop(req *stubs.StopRequest, res *stubs.S
 
 func NewGameOfLifeOperations() *GameOfLifeOperations {
 	return &GameOfLifeOperations{
-		shutdownChan: make(chan struct{}),
-		currentTurn:  0,
-		shouldStop:   false,
+		shutdownChan:    make(chan struct{}),
+		currentTurn:     0,
+		shouldStop:      false,
+		clientConnected: true,
 	}
 }
 
@@ -132,12 +134,6 @@ func (s *GameOfLifeOperations) TogglePause(req stubs.PauseRequest, res *stubs.Pa
 }
 
 func (s *GameOfLifeOperations) ProcessGameOfLife(req stubs.Request, res *stubs.Response) (err error) {
-	go func() {
-		for {
-			//fmt.Println("s.imageheight: ", s.imageHeight, "s.imagewidth: ", s.imageWidth)
-		}
-
-	}()
 	//fmt.Println("image height ", s.imageHeight, "image width ", s.imageWidth, "given world heght ", len(req.InitialWorld), "given world width ", len(req.InitialWorld[0]))
 	//check that the world isn't empty
 	if len(req.InitialWorld) == 0 {
@@ -164,7 +160,7 @@ func (s *GameOfLifeOperations) ProcessGameOfLife(req stubs.Request, res *stubs.R
 	//start updating world
 	quit := false
 	for s.currentTurn < req.Turns && !quit {
-		if s.shouldStop {
+		if s.shouldStop || !s.clientConnected {
 			break
 		}
 		if !s.paused {

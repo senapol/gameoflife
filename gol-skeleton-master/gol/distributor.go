@@ -73,6 +73,7 @@ func resetServerState(client *rpc.Client, width, height int, world [][]uint8) er
 }
 
 func distributor(p Params, c distributorChannels) {
+	fmt.Println("distributor called")
 	flag.Parse()
 	client, _ := rpc.Dial("tcp", *server)
 	defer client.Close()
@@ -98,17 +99,13 @@ func distributor(p Params, c distributorChannels) {
 			worldUpdate[y][x] = val
 		}
 	}
-	go func() {
-		for {
-			//fmt.Println("p.imageheight: ", p.ImageHeight, "p.imagewidth: ", p.ImageWidth)
-		}
+	fmt.Println("defined worlds")
 
-	}()
 	if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
 		fmt.Println("Error resetting server state:", err)
 		return
 	}
-
+	fmt.Println("reset server state")
 	ticker := time.NewTicker(2 * time.Second)
 	done := make(chan struct{})
 	tickerPaused := false
@@ -138,8 +135,11 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}()
 
+	fmt.Println("ran ticker")
+
 	currentTurn := 0
 	quit := false
+	shutDown := false
 
 	go func() {
 		for !quit {
@@ -151,11 +151,12 @@ func distributor(p Params, c distributorChannels) {
 					// Save current state as PGM file
 					saveWorldToPGM(world, c, p, currentTurn)
 				case 'q':
-					//update current turn
+					fmt.Println("q pressed")
 					quit = true
 				case 'k':
-					//update current turn and save image
+					fmt.Println("k pressed")
 					saveWorldToPGM(world, c, p, currentTurn)
+					shutDown = true
 
 					//shut down
 					shutdownReq := new(stubs.ShutdownRequest)
@@ -164,7 +165,6 @@ func distributor(p Params, c distributorChannels) {
 					if err != nil {
 						fmt.Println("Error in RPC call to shut down server:", err)
 					}
-					quit = true // Set flag to exit the loop
 					fmt.Println(shutdownRes.Message)
 				case 'p':
 					paused = !paused
@@ -180,10 +180,11 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 		if quit {
-			paused = true
-			pauseServerEvaluation(paused, client)
+			fmt.Println("quit key is pressed")
+			//paused = true
+			//pauseServerEvaluation(paused, client)
 
-			// Stop the game loop
+			//stopping game loop execution
 			stopReq := new(stubs.StopRequest)
 			stopRes := new(stubs.StopResponse)
 			err := client.Call("GameOfLifeOperations.StopGameLoop", stopReq, stopRes)
@@ -193,19 +194,19 @@ func distributor(p Params, c distributorChannels) {
 				fmt.Println(stopRes.Message)
 			}
 
-			// Reset the server state
+			//resetting server state
 			if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
 				fmt.Println("Error resetting server state:", err)
+				return
 			}
-
-			client.Close() // Close the RPC client connection
-			fmt.Println("Client closed")
 			return
 		}
 	}()
+	fmt.Println("ran kepresses")
 	response := makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
 	world = response.UpdatedWorld
-	if !quit {
+	fmt.Println("server responded with the entire world")
+	if !quit && !shutDown {
 		//output pgm file
 		currentTurn = updateCurrentTurn(client)
 		saveWorldToPGM(world, c, p, currentTurn)
@@ -225,29 +226,28 @@ func distributor(p Params, c distributorChannels) {
 		output := FinalTurnComplete{currentTurn, alive}
 		c.events <- output
 	}
-
-	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
 	c.events <- StateChange{currentTurn, Quitting}
+	fmt.Println("made it here")
+	if !shutDown {
+		//stopping game loop execution
+		stopReq := new(stubs.StopRequest)
+		stopRes := new(stubs.StopResponse)
+		err := client.Call("GameOfLifeOperations.StopGameLoop", stopReq, stopRes)
+		if err != nil {
+			fmt.Println("Error stopping game loop:", err)
+		} else {
+			fmt.Println(stopRes.Message)
+		}
 
-	//stopping game loop execution
-	stopReq := new(stubs.StopRequest)
-	stopRes := new(stubs.StopResponse)
-	err := client.Call("GameOfLifeOperations.StopGameLoop", stopReq, stopRes)
-	if err != nil {
-		fmt.Println("Error stopping game loop:", err)
-	} else {
-		fmt.Println(stopRes.Message)
+		//resetting server state
+		if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
+			fmt.Println("Error resetting server state:", err)
+			return
+		}
 	}
-
-	//resetting server state
-	if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
-		fmt.Println("Error resetting server state:", err)
-		return
-	}
-
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(done)
 	close(c.events)
