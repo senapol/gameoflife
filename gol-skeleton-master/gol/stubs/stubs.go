@@ -55,10 +55,43 @@ type ResetStateResponse struct {
 
 //stopping game loop if client disconnects
 type StopRequest struct {
-	// You can add fields here if needed, for example, a message or identifier
+	// We can add fields here if needed, for example, a message or identifier
 }
 
 // StopResponse is the response struct for the stop game loop request.
 type StopResponse struct {
 	Message string // A message from the server acknowledging the stop request
+}
+
+type StatusReport struct {
+	Message string // Can be used to relay success or error messages
+}
+
+// ChannelRequest is used to request the creation of a new topic channel in the broker.
+type ChannelRequest struct {
+	Topic  string // The name of the topic
+	Buffer int    // Buffer size for the channel
+}
+
+// PublishRequest is used by clients to publish data to a topic.
+type PublishRequest struct {
+	Topic   string            // The topic to which the request is published
+	Request GameOfLifeRequest // The actual Game of Life request being sent
+}
+
+// Subscription is used to subscribe to a topic on the broker.
+type Subscription struct {
+	Topic         string // The topic to subscribe to
+	ServerAddress string // The address of the server that is subscribing
+	Callback      string // The callback method on the server to process the request
+}
+
+type GameOfLifeRequest struct {
+	Type    string      // Type of request
+	Request interface{} // Changed to interface{} to support various request/response types
+}
+
+type GameOfLifeResponse struct {
+	Type     string      // Type of response
+	Response interface{} // Changed to interface{} for flexibility
 }

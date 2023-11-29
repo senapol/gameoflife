@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"net/rpc"
@@ -10,6 +11,20 @@ import (
 	"time"
 	"uk.ac.bris.cs/gameoflife/gol/stubs"
 )
+
+var (
+	gameOfLifeOps *GameOfLifeOperations
+	brokerClient  *rpc.Client
+)
+
+var brokerAddress = flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
+
+func getOutboundIP() string {
+	conn, _ := net.Dial("udp", "8.8.8.8:80")
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr).IP.String()
+	return localAddr
+}
 
 func countNeighbours(y, x int, world [][]uint8, imageHeight, imageWidth int) int {
 	neighbours := 0
@@ -33,10 +48,7 @@ func (s *GameOfLifeOperations) GetAliveCellsCount(req stubs.AliveCountRequest, r
 	return nil
 }
 
-func (s *GameOfLifeOperations) Shutdown(req *stubs.ShutdownRequest, res *stubs.ShutdownResponse) error {
-	// Implement the shutdown logic here
-	// For example, you might want to set a flag that causes the server loop to exit
-	// or perform some cleanup operations
+func (s *GameOfLifeOperations) Shutdown(req stubs.ShutdownRequest, res *stubs.ShutdownResponse) error {
 	close(s.shutdownChan)
 	// Respond with success
 	res.Success = true
@@ -112,7 +124,7 @@ func (s *GameOfLifeOperations) ResetState(req stubs.ResetStateRequest, res *stub
 	return nil
 }
 
-func (s *GameOfLifeOperations) StopGameLoop(req *stubs.StopRequest, res *stubs.StopResponse) error {
+func (s *GameOfLifeOperations) StopGameLoop(req stubs.StopRequest, res *stubs.StopResponse) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.shouldStop = true
@@ -181,6 +193,124 @@ func (s *GameOfLifeOperations) ProcessGameOfLife(req stubs.Request, res *stubs.R
 	return
 }
 
+func subscribeToBroker(brokerClient *rpc.Client, topic, callbackMethod string) {
+	subscription := stubs.Subscription{
+		Topic:         topic,
+		ServerAddress: getOutboundIP(), // Your server's address
+		Callback:      callbackMethod,
+	}
+
+	var status stubs.StatusReport
+	err := brokerClient.Call("Broker.Subscribe", subscription, &status)
+	if err != nil {
+		log.Fatalf("Error subscribing to topic: %v", err)
+	}
+}
+
+func (s *GameOfLifeOperations) ProcessGameOfLifeRequest(req stubs.GameOfLifeRequest, res *stubs.Response) error {
+	// Based on the request type, call the appropriate method
+	var err error
+	switch req.Type {
+	case "GetAliveCellsCount":
+		var res stubs.AliveCountResponse
+		err = gameOfLifeOps.GetAliveCellsCount(stubs.AliveCountRequest{}, &res)
+		if err != nil {
+			return err
+		}
+		// Publish response back to broker
+		publishResponseToBroker("ResponseTopic", "AliveCountResponse", res)
+
+	case "ProcessGameOfLife":
+		// Use type assertion to convert actualRequest to the expected type
+		actualRequest, ok := req.Request.(stubs.Request)
+		if !ok {
+			return fmt.Errorf("invalid request type for ProcessGameOfLife")
+		}
+		var res stubs.Response
+		err = gameOfLifeOps.ProcessGameOfLife(actualRequest, &res)
+		if err != nil {
+			return err
+		}
+		// Publish response back to broker
+		publishResponseToBroker("ResponseTopic", "GameOfLifeResponse", res)
+
+	case "TogglePause":
+		actualRequest, ok := req.Request.(stubs.PauseRequest)
+		if !ok {
+			return fmt.Errorf("invalid request type for ProcessGameOfLife")
+		}
+		var res stubs.PauseResponse
+		err = gameOfLifeOps.TogglePause(actualRequest, &res)
+		if err != nil {
+			return err
+		}
+		// Publish response back to broker
+		publishResponseToBroker("ResponseTopic", "AliveCountResponse", res)
+	case "Shutdown":
+		var res stubs.ShutdownResponse
+		err = gameOfLifeOps.Shutdown(stubs.ShutdownRequest{}, &res)
+		if err != nil {
+			return err
+		}
+		// Publish response back to broker
+		publishResponseToBroker("ResponseTopic", "AliveCountResponse", res)
+	case "ResetState":
+		actualRequest, ok := req.Request.(stubs.ResetStateRequest)
+		if !ok {
+			return fmt.Errorf("invalid request type for ProcessGameOfLife")
+		}
+		var res stubs.ResetStateResponse
+		err = gameOfLifeOps.ResetState(actualRequest, &res)
+		if err != nil {
+			return err
+		}
+		// Publish response back to broker
+		publishResponseToBroker("ResponseTopic", "AliveCountResponse", res)
+	case "StopGameLoop":
+		var res stubs.StopResponse
+		err = gameOfLifeOps.StopGameLoop(stubs.StopRequest{}, &res)
+		if err != nil {
+			return err
+		}
+		// Publish response back to broker
+		publishResponseToBroker("ResponseTopic", "AliveCountResponse", res)
+
+	default:
+		return fmt.Errorf("unknown request type: %s", req.Type)
+	}
+
+	return nil
+}
+
+func publishResponseToBroker(topic string, responseType string, response interface{}) {
+	// Wrap the response in GameOfLifeResponse
+	golResponse := stubs.GameOfLifeResponse{
+		Type:     responseType,
+		Response: response,
+	}
+
+	// Wrap the GameOfLifeResponse in GameOfLifeRequest
+	golRequest := stubs.GameOfLifeRequest{
+		Type:    responseType,
+		Request: golResponse,
+	}
+
+	// Create the actual PublishRequest for the broker
+	publishReq := stubs.PublishRequest{
+		Topic:   topic,
+		Request: golRequest,
+	}
+
+	// Perform an RPC call to the broker's Publish method
+	var status stubs.StatusReport
+	err := brokerClient.Call("Broker.Publish", publishReq, &status)
+	if err != nil {
+		fmt.Println("Failed to publish response to broker:", err)
+	} else {
+		fmt.Println("Response published to broker:", status.Message)
+	}
+}
+
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
@@ -196,6 +326,15 @@ func main() {
 		return
 	}
 	defer listener.Close()
+
+	var clientErr error
+	brokerClient, err = rpc.Dial("tcp", *brokerAddress)
+	if clientErr != nil {
+		fmt.Println("Error connecting to broker:", clientErr)
+		return
+	}
+	defer brokerClient.Close()
+	subscribeToBroker(brokerClient, "GameOfLife", "ProcessGameOfLifeRequest")
 
 	go func() {
 		for {
