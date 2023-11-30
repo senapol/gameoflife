@@ -308,7 +308,7 @@ func distributor(p Params, c distributorChannels) {
 
 	//resetting server state
 	if err := resetServerState(broker, p.ImageWidth, p.ImageHeight, world); err != nil {
-		fmt.Println("Error resetting server state:", err)
+		//fmt.Println("Error resetting server state:", err)
 		return
 	}
 
@@ -380,7 +380,7 @@ func distributor(p Params, c distributorChannels) {
 
 			//resetting server state
 			if err := resetServerState(broker, p.ImageWidth, p.ImageHeight, world); err != nil {
-				fmt.Println("Error resetting server state:", err)
+				//fmt.Println("Error resetting server state:", err)
 				return
 			}
 			return
@@ -417,7 +417,7 @@ func distributor(p Params, c distributorChannels) {
 
 		//resetting server state
 		if err := resetServerState(broker, p.ImageWidth, p.ImageHeight, world); err != nil {
-			fmt.Println("Error resetting server state:", err)
+			//fmt.Println("Error resetting server state:", err)
 			return
 		}
 	} else if shutDown {
