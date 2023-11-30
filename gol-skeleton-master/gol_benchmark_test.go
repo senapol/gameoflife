@@ -11,8 +11,7 @@ func BenchmarkRun(b *testing.B) {
 
 	os.Stdout = nil
 
-	fmt.Println("got here")
-	for threads := 1; threads <= 5; threads++ {
+	for threads := 1; threads <= 16; threads++ {
 
 		params := gol.Params{
 			Turns:       100,
@@ -25,7 +24,6 @@ func BenchmarkRun(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 
-				fmt.Println("stuck in loop")
 
 				events := make(chan gol.Event, 1000)
 				//keyPresses := make(chan rune, 10)
