@@ -65,9 +65,9 @@ func countAliveCells(world [][]uint8) int {
 	return count
 }
 
-func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params) {
+func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params, turns int) {
 	c.ioCommand <- ioOutput
-	c.ioFilename <- fmt.Sprint(p.ImageWidth) + "x" + fmt.Sprint(p.ImageHeight) + "x" + fmt.Sprint(p.Turns)
+	c.ioFilename <- fmt.Sprint(p.ImageWidth) + "x" + fmt.Sprint(p.ImageHeight) + "x" + fmt.Sprint(turns)
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			c.ioOutput <- world[y][x]
@@ -157,7 +157,7 @@ func distributor(p Params, c distributorChannels) {
 				}
 			case 's':
 				fmt.Println("Starting output")
-				saveWorldToPGM(world, c, p)
+				saveWorldToPGM(world, c, p, turn)
 			case 'q':
 				c.events <- StateChange{turn, 2}
 				quit = true
@@ -217,7 +217,7 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	// TODO: Create a 2D slice to store the world.
-	saveWorldToPGM(world, c, p)
+	saveWorldToPGM(world, c, p, turn)
 
 	var alive []util.Cell
 	for y := 0; y < p.ImageHeight; y++ {
