@@ -20,7 +20,7 @@ type distributorChannels struct {
 	keyPresses <-chan rune
 }
 
-var server = flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
+var cAddress = flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
 
 func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params, currentTurn int) {
 	if world == nil || len(world) == 0 {
@@ -162,7 +162,7 @@ func makeCall(b *broker.Broker, initialWorld [][]uint8, turns int, imageWidth, i
 
 	// Process the response
 	if resp, ok := res.(*stubs.Response); ok {
-		fmt.Println("Responded")
+		fmt.Println("Server Responded")
 		return resp
 	} else if err, ok := res.(error); ok {
 		// Handle the error
@@ -275,7 +275,21 @@ func getAliveCellsCount(b *broker.Broker) (*stubs.AliveCountResponse, error) {
 
 func distributor(p Params, c distributorChannels) {
 	flag.Parse()
-	client, _ := rpc.Dial("tcp", *server)
+	client, err := rpc.Dial("tcp", *cAddress)
+	if err != nil {
+		fmt.Println("Client: Failed to connect, retrying...")
+		time.Sleep(1 * time.Second) // Retry every second
+		for {
+			client, err = rpc.Dial("tcp", *cAddress)
+			if err != nil {
+				fmt.Println("Client: Failed to connect, retrying...")
+				time.Sleep(1 * time.Second) // Retry every 5 seconds
+			} else {
+				fmt.Println("Client: Connected.")
+				break
+			}
+		}
+	}
 	defer client.Close()
 	broker := broker.NewBroker(client)
 	broker.Start()
