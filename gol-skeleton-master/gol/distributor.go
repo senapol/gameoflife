@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/rpc"
 	"time"
+	"uk.ac.bris.cs/gameoflife/gol/broker"
 	"uk.ac.bris.cs/gameoflife/gol/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -19,7 +20,7 @@ type distributorChannels struct {
 	keyPresses <-chan rune
 }
 
-var server = flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
+var cAddress = flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
 
 func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params, currentTurn int) {
 	if world == nil || len(world) == 0 {
@@ -39,43 +40,260 @@ func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params, currentTur
 	<-c.ioIdle
 }
 
-func updateCurrentTurn(client *rpc.Client) int {
+func updateCurrentTurn(b *broker.Broker) int {
 	turnRequest := stubs.AliveCountRequest{}
 	turnResponse := new(stubs.AliveCountResponse)
-	turnErr := client.Call("GameOfLifeOperations.GetAliveCellsCount", turnRequest, turnResponse)
-	if turnErr != nil {
-		fmt.Println("Error in RPC call:", turnErr)
+	responseChan := make(chan interface{})
+
+	// Create an RPC request message
+	rpcRequestMsg := broker.Message{
+		Type: "RPCRequest",
+		Payload: broker.RPCRequestMessage{
+			MethodName:   "GameOfLifeOperations.GetAliveCellsCount",
+			Request:      turnRequest,
+			Response:     turnResponse,
+			ResponseChan: responseChan,
+		},
 	}
-	return turnResponse.CompletedTurns
+
+	// Send the message to the Broker
+	b.SendMessage(rpcRequestMsg)
+
+	// Wait for the response
+	response := <-responseChan
+
+	// Process the response
+	if resp, ok := response.(*stubs.AliveCountResponse); ok {
+		return resp.CompletedTurns
+	} else if err, ok := response.(error); ok {
+		fmt.Println("Error in RPC call:", err)
+		return -1 // or any other indication of error
+	} else {
+		fmt.Println("Unexpected response type")
+		return -1 // or any other indication of error
+	}
 }
 
-func pauseServerEvaluation(paused bool, client *rpc.Client) {
+func pauseServerEvaluation(paused bool, b *broker.Broker) {
 	pauseReq := stubs.PauseRequest{Pause: paused}
 	pauseRes := new(stubs.PauseResponse)
-	err := client.Call("GameOfLifeOperations.TogglePause", pauseReq, pauseRes)
-	if err != nil {
+	responseChan := make(chan interface{})
+
+	// Create an RPC request message
+	rpcRequestMsg := broker.Message{
+		Type: "RPCRequest",
+		Payload: broker.RPCRequestMessage{
+			MethodName:   "GameOfLifeOperations.TogglePause",
+			Request:      pauseReq,
+			Response:     pauseRes,
+			ResponseChan: responseChan,
+		},
+	}
+
+	// Send the message to the Broker
+	b.SendMessage(rpcRequestMsg)
+
+	// Wait for the response
+	response := <-responseChan
+
+	// Process the response
+	if _, ok := response.(*stubs.PauseResponse); ok {
+		// Pause toggled successfully
+	} else if err, ok := response.(error); ok {
 		fmt.Println("Error in RPC call to toggle pause:", err)
+	} else {
+		fmt.Println("Unexpected response type")
 	}
 }
 
-func makeCall(client *rpc.Client, initialWorld [][]uint8, turns int, imageWidth, imageHeight int) *stubs.Response {
-	request := stubs.Request{InitialWorld: initialWorld, Turns: turns, ImageWidth: imageWidth, ImageHeight: imageHeight}
-	response := new(stubs.Response)
-	client.Call(stubs.ProcessGameOfLifeHandler, request, response)
-	fmt.Println("Responded")
-	return response
+func shutdownServer(b *broker.Broker) {
+	shutdownReq := new(stubs.ShutdownRequest)
+	shutdownRes := new(stubs.ShutdownResponse)
+	responseChan := make(chan interface{})
+
+	// Create an RPC request message
+	rpcRequestMsg := broker.Message{
+		Type: "RPCRequest",
+		Payload: broker.RPCRequestMessage{
+			MethodName:   "GameOfLifeOperations.Shutdown",
+			Request:      shutdownReq,
+			Response:     shutdownRes,
+			ResponseChan: responseChan,
+		},
+	}
+
+	// Send the message to the Broker
+	b.SendMessage(rpcRequestMsg)
+
+	// Wait for the response
+	response := <-responseChan
+
+	// Process the response
+	if res, ok := response.(*stubs.ShutdownResponse); ok {
+		fmt.Println(res.Message)
+	} else if err, ok := response.(error); ok {
+		fmt.Println("Error in RPC call to shut down server:", err)
+	} else {
+		fmt.Println("Unexpected response type")
+	}
 }
 
-func resetServerState(client *rpc.Client, width, height int, world [][]uint8) error {
+func makeCall(b *broker.Broker, initialWorld [][]uint8, turns int, imageWidth, imageHeight int) *stubs.Response {
+	request := stubs.Request{InitialWorld: initialWorld, Turns: turns, ImageWidth: imageWidth, ImageHeight: imageHeight}
+	response := new(stubs.Response)
+	responseChan := make(chan interface{})
+
+	// Create an RPC request message
+	rpcRequestMsg := broker.Message{
+		Type: "RPCRequest",
+		Payload: broker.RPCRequestMessage{
+			MethodName:   stubs.ProcessGameOfLifeHandler,
+			Request:      request,
+			Response:     response,
+			ResponseChan: responseChan,
+		},
+	}
+
+	// Send the message to the Broker
+	b.SendMessage(rpcRequestMsg)
+
+	// Wait for the response
+	res := <-responseChan
+
+	// Process the response
+	if resp, ok := res.(*stubs.Response); ok {
+		fmt.Println("Server Responded")
+		return resp
+	} else if err, ok := res.(error); ok {
+		// Handle the error
+		fmt.Println("Error in RPC call:", err)
+		return nil
+	} else {
+		// Handle unexpected response type
+		fmt.Println("Unexpected response type")
+		return nil
+	}
+}
+
+func resetServerState(b *broker.Broker, width, height int, world [][]uint8) error {
 	req := stubs.ResetStateRequest{ImageWidth: width, ImageHeight: height, World: world}
 	res := new(stubs.ResetStateResponse)
-	return client.Call("GameOfLifeOperations.ResetState", &req, res)
+	responseChan := make(chan interface{})
+
+	// Create an RPC request message
+	rpcRequestMsg := broker.Message{
+		Type: "RPCRequest",
+		Payload: broker.RPCRequestMessage{
+			MethodName:   "GameOfLifeOperations.ResetState",
+			Request:      &req,
+			Response:     res,
+			ResponseChan: responseChan,
+		},
+	}
+
+	// Send the message to the Broker
+	b.SendMessage(rpcRequestMsg)
+
+	// Wait for the response
+	response := <-responseChan
+
+	// Check and process the response
+	if _, ok := response.(*stubs.ResetStateResponse); ok {
+		return nil // No error, successful reset
+	} else if err, ok := response.(error); ok {
+		return fmt.Errorf("error resetting server state: %v", err)
+	} else {
+		return fmt.Errorf("unexpected response type")
+	}
+}
+
+func stopGameLoop(b *broker.Broker) {
+	stopReq := new(stubs.StopRequest)
+	stopRes := new(stubs.StopResponse)
+	responseChan := make(chan interface{})
+
+	// Create an RPC request message
+	rpcRequestMsg := broker.Message{
+		Type: "RPCRequest",
+		Payload: broker.RPCRequestMessage{
+			MethodName:   "GameOfLifeOperations.StopGameLoop",
+			Request:      stopReq,
+			Response:     stopRes,
+			ResponseChan: responseChan,
+		},
+	}
+
+	// Send the message to the Broker
+	b.SendMessage(rpcRequestMsg)
+
+	// Wait for the response
+	response := <-responseChan
+
+	// Process the response
+	if res, ok := response.(*stubs.StopResponse); ok {
+		fmt.Println(res.Message)
+	} else if err, ok := response.(error); ok {
+		// If the response is an error
+		fmt.Println("Error stopping game loop:", err)
+	} else {
+		// Handle unexpected response type
+		fmt.Println("Unexpected response type")
+	}
+}
+
+func getAliveCellsCount(b *broker.Broker) (*stubs.AliveCountResponse, error) {
+	request := stubs.AliveCountRequest{}
+	response := new(stubs.AliveCountResponse)
+	responseChan := make(chan interface{})
+
+	// Create an RPC request message
+	rpcRequestMsg := broker.Message{
+		Type: "RPCRequest",
+		Payload: broker.RPCRequestMessage{
+			MethodName:   "GameOfLifeOperations.GetAliveCellsCount",
+			Request:      request,
+			Response:     response,
+			ResponseChan: responseChan,
+		},
+	}
+
+	// Send the message to the Broker
+	b.SendMessage(rpcRequestMsg)
+
+	// Wait for the response
+	res := <-responseChan
+
+	// Process the response
+	if resp, ok := res.(*stubs.AliveCountResponse); ok {
+		return resp, nil
+	} else if err, ok := res.(error); ok {
+		return nil, fmt.Errorf("error in RPC call: %v", err)
+	} else {
+		return nil, fmt.Errorf("unexpected response type")
+	}
 }
 
 func distributor(p Params, c distributorChannels) {
 	flag.Parse()
-	client, _ := rpc.Dial("tcp", *server)
+	client, err := rpc.Dial("tcp", *cAddress)
+	if err != nil {
+		fmt.Println("Client: Failed to connect, retrying...")
+		time.Sleep(1 * time.Second) // Retry every second
+		for {
+			client, err = rpc.Dial("tcp", *cAddress)
+			if err != nil {
+				fmt.Println("Client: Failed to connect, retrying...")
+				time.Sleep(1 * time.Second) // Retry every 5 seconds
+			} else {
+				fmt.Println("Client: Connected.")
+				break
+			}
+		}
+	}
 	defer client.Close()
+	broker := broker.NewBroker(client)
+	broker.Start()
+	defer broker.Stop()
 
 	paused := false
 	//pauseServerEvaluation(paused, client)
@@ -100,18 +318,11 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	//stopping game loop execution
-	stopReq := new(stubs.StopRequest)
-	stopRes := new(stubs.StopResponse)
-	err := client.Call("GameOfLifeOperations.StopGameLoop", stopReq, stopRes)
-	if err != nil {
-		fmt.Println("Error stopping game loop:", err)
-	} else {
-		fmt.Println(stopRes.Message)
-	}
+	stopGameLoop(broker)
 
 	//resetting server state
-	if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
-		fmt.Println("Error resetting server state:", err)
+	if err := resetServerState(broker, p.ImageWidth, p.ImageHeight, world); err != nil {
+		//fmt.Println("Error resetting server state:", err)
 		return
 	}
 
@@ -125,9 +336,7 @@ func distributor(p Params, c distributorChannels) {
 			select {
 			case <-ticker.C:
 				if !tickerPaused {
-					request := stubs.AliveCountRequest{}
-					response := new(stubs.AliveCountResponse)
-					err := client.Call("GameOfLifeOperations.GetAliveCellsCount", request, response)
+					response, err := getAliveCellsCount(broker)
 					if err != nil {
 						fmt.Println("Error in RPC call:", err)
 						continue
@@ -152,7 +361,7 @@ func distributor(p Params, c distributorChannels) {
 		for !quit {
 			select {
 			case key := <-c.keyPresses:
-				currentTurn = updateCurrentTurn(client)
+				currentTurn = updateCurrentTurn(broker)
 				switch key {
 				case 's':
 					// Save current state as PGM file
@@ -161,19 +370,11 @@ func distributor(p Params, c distributorChannels) {
 					quit = true
 				case 'k':
 					saveWorldToPGM(world, c, p, currentTurn)
+					quit = true
 					shutDown = true
-
-					//shut down
-					shutdownReq := new(stubs.ShutdownRequest)
-					shutdownRes := new(stubs.ShutdownResponse)
-					err := client.Call("GameOfLifeOperations.Shutdown", shutdownReq, shutdownRes)
-					if err != nil {
-						fmt.Println("Error in RPC call to shut down server:", err)
-					}
-					fmt.Println(shutdownRes.Message)
 				case 'p':
 					paused = !paused
-					pauseServerEvaluation(paused, client)
+					pauseServerEvaluation(paused, broker)
 					if paused {
 						c.events <- StateChange{currentTurn, 0}
 						tickerPaused = true
@@ -189,28 +390,21 @@ func distributor(p Params, c distributorChannels) {
 			//pauseServerEvaluation(paused, client)
 
 			//stopping game loop execution
-			stopReq := new(stubs.StopRequest)
-			stopRes := new(stubs.StopResponse)
-			err := client.Call("GameOfLifeOperations.StopGameLoop", stopReq, stopRes)
-			if err != nil {
-				fmt.Println("Error stopping game loop:", err)
-			} else {
-				fmt.Println(stopRes.Message)
-			}
+			stopGameLoop(broker)
 
 			//resetting server state
-			if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
-				fmt.Println("Error resetting server state:", err)
+			if err := resetServerState(broker, p.ImageWidth, p.ImageHeight, world); err != nil {
+				//fmt.Println("Error resetting server state:", err)
 				return
 			}
 			return
 		}
 	}()
-	response := makeCall(client, world, p.Turns, p.ImageWidth, p.ImageHeight)
+	response := makeCall(broker, world, p.Turns, p.ImageWidth, p.ImageHeight)
 	world = response.UpdatedWorld
 	if !quit && !shutDown {
 		//output pgm file
-		currentTurn = updateCurrentTurn(client)
+		currentTurn = updateCurrentTurn(broker)
 		saveWorldToPGM(world, c, p, currentTurn)
 		aliveCount := 0
 		var alive []util.Cell
@@ -233,20 +427,16 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- StateChange{currentTurn, Quitting}
 	if !shutDown {
 		//stopping game loop execution
-		stopReq := new(stubs.StopRequest)
-		stopRes := new(stubs.StopResponse)
-		err := client.Call("GameOfLifeOperations.StopGameLoop", stopReq, stopRes)
-		if err != nil {
-			fmt.Println("Error stopping game loop:", err)
-		} else {
-			fmt.Println(stopRes.Message)
-		}
+		stopGameLoop(broker)
 
 		//resetting server state
-		if err := resetServerState(client, p.ImageWidth, p.ImageHeight, world); err != nil {
-			fmt.Println("Error resetting server state:", err)
+		if err := resetServerState(broker, p.ImageWidth, p.ImageHeight, world); err != nil {
+			//fmt.Println("Error resetting server state:", err)
 			return
 		}
+	} else if shutDown {
+		//shut down server
+		shutdownServer(broker)
 	}
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(done)
