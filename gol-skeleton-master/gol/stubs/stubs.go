@@ -1,6 +1,15 @@
 package stubs
 
+import "encoding/gob"
+
 var ProcessGameOfLifeHandler = "GameOfLifeOperations.ProcessGameOfLife"
+
+func init() {
+	gob.Register(StopRequest{})
+	gob.Register(StopResponse{})
+	gob.Register(GameOfLifeResponse{})
+	// Register other custom types here if necessary
+}
 
 //basic response and requests for the gol logic
 type Response struct {

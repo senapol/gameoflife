@@ -20,7 +20,7 @@ type distributorChannels struct {
 	keyPresses <-chan rune
 }
 
-var brokerAddress = flag.String("server", "127.0.0.1:8030", "IP:port string to connect to as server")
+var brokerAddress = flag.String("server", "127.0.0.1:8040", "IP:port string to connect to as server")
 
 func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params, currentTurn int) {
 	if world == nil || len(world) == 0 {
@@ -42,11 +42,11 @@ func saveWorldToPGM(world [][]uint8, c distributorChannels, p Params, currentTur
 
 func updateCurrentTurn(client *rpc.Client) int {
 	// Subscribe to a response topic
-	responseTopic := "GameOfLifeResponse"
+	responseTopic := "GameOfLife"
 	client.Call("Broker.CreateChannel", stubs.ChannelRequest{Topic: responseTopic, Buffer: 1}, new(stubs.StatusReport))
 
 	golRequest := stubs.GameOfLifeRequest{
-		Type:    "StopGameLoop", // Specify the type of Game of Life request
+		Type:    "GetAliveCellsCount", // Specify the type of Game of Life request
 		Request: stubs.AliveCountRequest{},
 	}
 
@@ -60,7 +60,9 @@ func updateCurrentTurn(client *rpc.Client) int {
 
 	// Wait for response
 	responseChan := make(chan interface{})
-	go waitForResponse(client, responseTopic, responseChan)
+	done := make(chan struct{})
+	go waitForResponse(client, responseTopic, responseChan, done)
+	close(done)
 
 	// Blocking wait for response
 	response := <-responseChan
@@ -79,11 +81,11 @@ func updateCurrentTurn(client *rpc.Client) int {
 
 func pauseServerEvaluation(paused bool, client *rpc.Client) {
 	// Subscribe to a response topic
-	responseTopic := "GameOfLifeResponse"
+	responseTopic := "GameOfLife"
 	client.Call("Broker.CreateChannel", stubs.ChannelRequest{Topic: responseTopic, Buffer: 1}, new(stubs.StatusReport))
 
 	golRequest := stubs.GameOfLifeRequest{
-		Type:    "StopGameLoop", // Specify the type of Game of Life request
+		Type:    "TogglePause", // Specify the type of Game of Life request
 		Request: stubs.PauseRequest{Pause: paused},
 	}
 
@@ -97,7 +99,9 @@ func pauseServerEvaluation(paused bool, client *rpc.Client) {
 
 	// Wait for response
 	responseChan := make(chan interface{})
-	go waitForResponse(client, responseTopic, responseChan)
+	done := make(chan struct{})
+	go waitForResponse(client, responseTopic, responseChan, done)
+	close(done)
 
 	// Blocking wait for response
 	response := <-responseChan
@@ -115,7 +119,7 @@ func pauseServerEvaluation(paused bool, client *rpc.Client) {
 func stopGameLoop(client *rpc.Client) {
 	// Subscribe to a response topic
 	statusReport := new(stubs.StatusReport)
-	responseTopic := "GameOfLifeResponse"
+	responseTopic := "GameOfLife"
 	fmt.Println("before create channel")
 	err := client.Call("Broker.CreateChannel", stubs.ChannelRequest{Topic: responseTopic, Buffer: 1}, &statusReport)
 	if err != nil {
@@ -133,16 +137,22 @@ func stopGameLoop(client *rpc.Client) {
 		Topic:   "GameOfLife",
 		Request: golRequest,
 	}
-
-	client.Call("Broker.Publish", publishReq, new(stubs.StatusReport))
-	fmt.Println("we called the broker")
+	fmt.Println("calling publish")
+	pubErr := client.Call("Broker.Publish", publishReq, new(stubs.StatusReport))
+	if pubErr != nil {
+		log.Printf("RPC call failed: %v", pubErr)
+	}
 	// Wait for response
 	responseChan := make(chan interface{})
-	go waitForResponse(client, responseTopic, responseChan)
+	done := make(chan struct{})
+	go waitForResponse(client, responseTopic, responseChan, done)
+	close(done)
 
 	// Blocking wait for response
 	response := <-responseChan
+	fmt.Println("we called the broker, response: ", response)
 
+	fmt.Println("received response")
 	// Process the response
 	if res, ok := response.(*stubs.StopResponse); ok {
 		fmt.Println(res.Message)
@@ -157,11 +167,11 @@ func stopGameLoop(client *rpc.Client) {
 
 func getAliveCellsCount(client *rpc.Client) (*stubs.AliveCountResponse, error) {
 	// Subscribe to a response topic
-	responseTopic := "GameOfLifeResponse"
+	responseTopic := "GameOfLife"
 	client.Call("Broker.CreateChannel", stubs.ChannelRequest{Topic: responseTopic, Buffer: 1}, new(stubs.StatusReport))
 
 	golRequest := stubs.GameOfLifeRequest{
-		Type:    "StopGameLoop", // Specify the type of Game of Life request
+		Type:    "GetAliveCellsCount", // Specify the type of Game of Life request
 		Request: stubs.AliveCountRequest{},
 	}
 
@@ -175,7 +185,9 @@ func getAliveCellsCount(client *rpc.Client) (*stubs.AliveCountResponse, error) {
 
 	// Wait for response
 	responseChan := make(chan interface{})
-	go waitForResponse(client, responseTopic, responseChan)
+	done := make(chan struct{})
+	go waitForResponse(client, responseTopic, responseChan, done)
+	close(done)
 
 	// Blocking wait for response
 	res := <-responseChan
@@ -192,7 +204,7 @@ func getAliveCellsCount(client *rpc.Client) (*stubs.AliveCountResponse, error) {
 
 func makeCall(client *rpc.Client, initialWorld [][]uint8, turns int, imageWidth, imageHeight int) *stubs.Response {
 	// Subscribe to a response topic
-	responseTopic := "GameOfLifeResponse"
+	responseTopic := "GameOfLife"
 	client.Call("Broker.CreateChannel", stubs.ChannelRequest{Topic: responseTopic, Buffer: 1}, new(stubs.StatusReport))
 
 	golRequest := stubs.GameOfLifeRequest{
@@ -215,7 +227,9 @@ func makeCall(client *rpc.Client, initialWorld [][]uint8, turns int, imageWidth,
 
 	// Wait for response
 	responseChan := make(chan interface{})
-	go waitForResponse(client, responseTopic, responseChan)
+	done := make(chan struct{})
+	go waitForResponse(client, responseTopic, responseChan, done)
+	close(done)
 
 	// Blocking wait for response
 	res := <-responseChan
@@ -236,11 +250,11 @@ func makeCall(client *rpc.Client, initialWorld [][]uint8, turns int, imageWidth,
 
 func resetServerState(client *rpc.Client, width, height int, world [][]uint8) error {
 	// Subscribe to a response topic
-	responseTopic := "GameOfLifeResponse"
+	responseTopic := "GameOfLife"
 	client.Call("Broker.CreateChannel", stubs.ChannelRequest{Topic: responseTopic, Buffer: 1}, new(stubs.StatusReport))
 
 	golRequest := stubs.GameOfLifeRequest{
-		Type:    "StopGameLoop", // Specify the type of Game of Life request
+		Type:    "ResetState", // Specify the type of Game of Life request
 		Request: stubs.ResetStateRequest{ImageWidth: width, ImageHeight: height, World: world},
 	}
 
@@ -254,7 +268,9 @@ func resetServerState(client *rpc.Client, width, height int, world [][]uint8) er
 
 	// Wait for response
 	responseChan := make(chan interface{})
-	go waitForResponse(client, responseTopic, responseChan)
+	done := make(chan struct{})
+	go waitForResponse(client, responseTopic, responseChan, done)
+	close(done)
 
 	// Blocking wait for response
 	response := <-responseChan
@@ -281,11 +297,11 @@ func shutDownBroker(client *rpc.Client) {
 
 func shutdownServer(client *rpc.Client) {
 	// Subscribe to a response topic
-	responseTopic := "GameOfLifeResponse"
+	responseTopic := "GameOfLife"
 	client.Call("Broker.CreateChannel", stubs.ChannelRequest{Topic: responseTopic, Buffer: 1}, new(stubs.StatusReport))
 
 	golRequest := stubs.GameOfLifeRequest{
-		Type:    "StopGameLoop", // Specify the type of Game of Life request
+		Type:    "Shutdown", // Specify the type of Game of Life request
 		Request: stubs.ShutdownRequest{},
 	}
 
@@ -299,7 +315,9 @@ func shutdownServer(client *rpc.Client) {
 
 	// Wait for response
 	responseChan := make(chan interface{})
-	go waitForResponse(client, responseTopic, responseChan)
+	done := make(chan struct{})
+	go waitForResponse(client, responseTopic, responseChan, done)
+	close(done)
 
 	// Blocking wait for response
 	response := <-responseChan
@@ -314,19 +332,24 @@ func shutdownServer(client *rpc.Client) {
 	}
 }
 
-func waitForResponse(client *rpc.Client, topic string, responseChan chan interface{}) {
+func waitForResponse(client *rpc.Client, topic string, responseChan chan interface{}, done <-chan struct{}) {
 	for {
-		// Implement logic to receive a response from the response topic
-		var response stubs.Response
-		client.Call("Broker.Subscribe", stubs.Subscription{
-			Topic: topic,
-			// Callback: This should be a method on the client to handle responses
-			Callback: "ClientMethodToHandleResponse",
-		}, new(stubs.StatusReport))
-
-		responseChan <- &response
+		select {
+		case <-done:
+			// Received a signal to stop listening
+			return
+		default:
+			var response stubs.GameOfLifeResponse
+			err := client.Call("Broker.ListenToTopic", topic, &response)
+			if err != nil {
+				fmt.Println("Error listening to topic:", err)
+				// Send the error to the response channel and return
+				responseChan <- err
+				return
+			}
+			responseChan <- response.Response
+		}
 	}
-
 }
 
 func distributor(p Params, c distributorChannels) {
